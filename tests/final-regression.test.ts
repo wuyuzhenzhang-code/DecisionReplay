@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {examples} from '../lib/examples.ts';
-import {buildContext,ruleReport,metrics,validateCase,reportMarkdown,type Claim,type Check,type SavedReport} from '../lib/replay.ts';
+import {buildContext,ruleReport,metrics,validateCase,validateReport,reportMarkdown,type Claim,type Check,type SavedReport} from '../lib/replay.ts';
 import {caseSchema} from '../lib/request-schema.ts';
 import {importCaseJSON} from '../lib/case-import.ts';
 import {enforceSemantics,simplifyReport,validateGrounding} from '../lib/grounding.ts';
-import {analyze} from '../lib/ai.ts';
+import {analyze,modelPayload} from '../lib/ai.ts';
 import {learningEligibility,historicalLearning,reuseLearning,editLearning,checksFromReport} from '../lib/learning.ts';
 
 const failure='关注价格变化，但需要经营证据验证，价格本身不能证明原因。';
@@ -50,3 +50,10 @@ test('清单：导出再导入保持来源和原始时间，不重置历史资�
 test('清单：报告生成时记录形成时间/来源结论/视角，学习不进入市场证据',()=>{const c=fixture(),ctx=buildContext(c,'before',c.trades[0].at),saved:SavedReport={report:ruleReport(ctx),revision:1,perspective:'before',cutoff:c.trades[0].at,createdAt:'2026-10-14T00:00:00Z',mode:'rules',trace:[]};c.checklist=checksFromReport(c.id,saved);assert.equal(c.checklist[0].formedAt,saved.createdAt);assert.equal(c.checklist[0].sourcePerspective,'before');assert.ok(c.checklist[0].sourceText);c.checklist[0].text='仅学习使用的秘密标记';assert.ok(!JSON.stringify(buildContext(c,'before',c.trades[0].at)).includes('仅学习使用的秘密标记'));});
 test('清单：重复导入保留原案例身份，不能把本案例事后结论变成跨案例',()=>{const c=fixture();c.checklist=[check({sourceCase:c.id,carriedAt:undefined})];const once=importCaseJSON(JSON.stringify(c)),twice=importCaseJSON(JSON.stringify(once));assert.equal(twice.originalCaseId,c.id);assert.equal(twice.checklist[0].sourceCase,c.id);assert.equal(historicalLearning(twice,cutoff).length,0);assert.match(learningEligibility(twice.checklist[0],twice.id,cutoff,twice.originalCaseId).reason,/本案例事后/);});
 test('清单：本案例事前已形成的内容导入后保留资格，不要求伪造带入时间',()=>{const c=fixture();c.checklist=[check({sourceCase:c.id,carriedAt:undefined,sourcePerspective:'before'})];const restored=importCaseJSON(JSON.stringify(c));assert.equal(historicalLearning(restored,cutoff).length,1);assert.equal(restored.checklist[0].carriedAt,undefined);});
+
+test('模型引用目录仅含允许证据的原始标量，字段和值可逐字回查',()=>{const c=fixture(),ctx=buildContext(c,'before',c.trades[0].at),data=JSON.parse(modelPayload(ctx,'','gpt-5-mini').input);assert.ok(data.quote_sources.length);for(const q of data.quote_sources){const e=ctx.evidence.find(e=>e.id===q.evidence_id);assert.ok(e);assert.equal(q.quote,String(e.raw[q.field]));assert.ok(['string','number','boolean'].includes(typeof e.raw[q.field]));}assert.ok(data.quote_sources.some((q:{field:string;quote:string})=>q.field==='text'&&q.quote===failure));});
+
+test('清单诊断区分数字违规与不存在的来源，合法来源不报错',()=>{const {r,ctx}=grounded();r.checklist[0]={text:'记录2025年的理由',claim_id:'price-0'};const errors=validateReport(r,ctx);assert.ok(errors.some(e=>e.includes('包含阿拉伯数字')));assert.ok(errors.some(e=>e.includes('来源结论不存在')));r.checklist[0]={text:'保存当时理由',claim_id:r.summary.id};assert.deepEqual(validateReport(r,ctx),[]);});
+test('模型校验重试保留逐字引用指令并提供实际结论 ID，不修补非法来源',async()=>{const {r,ctx}=grounded();r.checklist[0].claim_id='not-a-claim';const payloads:{instructions:string}[]=[];const mock:typeof fetch=async(_url,init)=>{payloads.push(JSON.parse(String(init?.body)));return Response.json({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(r)}]}]});};await assert.rejects(analyze(ctx,'','test-key','gpt-5-mini',mock),/来源结论不存在/);assert.equal(payloads.length,2);assert.match(payloads[1].instructions,/input.quote_sources/);assert.match(payloads[1].instructions,/本次实际结论 ID/);});
+
+test('时间语义：不得将声明的当时理由说成已在成交前系统保存',()=>{const {r,ctx}=grounded();const reason=ctx.evidence.find(e=>e.type==='reason')!;r.facts[0].text='事前记录显示在保存理由之后发生一次买入成交。';r.facts[0].evidence_ids=['trade-0'];r.facts[0].grounding={topic:'observation',relation:'direct',supports:[{evidence_id:reason.id,field:'origin',quote:'contemporaneous'}],missing_conditions:[],alternatives:[]};const out=enforceSemantics(r,ctx);assert.equal(out.report.facts[0].kind,'uncertain');assert.match(out.report.facts[0].text,/系统保存时间是独立/);assert.ok(out.adjustments.some(x=>x.reason.includes('系统保存时间')));});
