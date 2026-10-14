@@ -133,7 +133,13 @@ export function validateReport(r:Report,ctx:ReturnType<typeof buildContext>):str
   if(r.biases.some(x=>x?.kind==='fact'))errors.push('行为偏差只能作为线索或无法判断');
   if(ctx.evidence.some(e=>e.mode==='historical')&&!ctx.evidence.some(e=>e.mode==='synthetic')&&/^(?:本|该|此)?(?:案例|报告|摘要)?[：:，,\s]*(?:是|为|属于)?[\s]*合成示例/.test(r.summary.text))errors.push('摘要将包含真实历史行情的案例整体误标为合成示例；请区分接口行情和用户构造材料');
   if(r.checklist.length<3||r.checklist.length>5)errors.push('检查清单应有三至五项');
-  if(r.checklist.some(x=>!x||typeof x.text!=='string'||x.text.length>500||/\d/.test(x.text)||forbidden.test(x.text)||!claimIds.has(x.claim_id)))errors.push('清单文本或来源结论无效');
+  for(const item of r.checklist){
+    if(!item||typeof item.text!=='string'){errors.push('清单文本格式无效');continue;}
+    if(item.text.length>500)errors.push('清单文本超过五百字符');
+    if(/\d/.test(item.text))errors.push('清单文本包含阿拉伯数字；日期、编号与金额须改为不含数字的检查动作');
+    if(forbidden.test(item.text))errors.push('清单文本包含禁止的交易指令或承诺');
+    if(!claimIds.has(item.claim_id))errors.push('清单来源结论不存在；claim_id 只能选本次实际结论 ID：'+[...claimIds].join('、'));
+  }
   return [...new Set(errors)];
 }
 export function ruleReport(ctx:ReturnType<typeof buildContext>):Report{

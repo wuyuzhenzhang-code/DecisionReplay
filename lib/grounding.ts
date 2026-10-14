@@ -51,6 +51,13 @@ export function enforceSemantics(input:Report,ctx:Context):{report:Report;adjust
   const claims=[report.summary,...report.facts,...report.hypotheses,...report.biases,...report.uncertainties];
   for(const x of claims){
     const g=x.grounding!;
+    // A user-declared historical time is distinct from the later system save.
+    if(/(保存|归档|写入)/.test(x.text)&&/(之前|之后|早于|晚于|先于|随后|先保存|保存后)/.test(x.text)&&(/(理由|决策记录|原始记录)/.test(x.text)||ctx.evidence.some(e=>e.type==='reason'&&x.evidence_ids.includes(e.id)))){
+      x.text='理由的历史记录时间来自用户声明，系统保存时间是独立的时间。现有记录不能仅凭声明证明理由已在成交之前保存；需核对原始记录与时间凭据。';x.kind='uncertain';x.metric_keys=[];
+      x.evidence_ids=ctx.evidence.filter(e=>e.type==='reason').map(e=>e.id);
+      x.grounding={topic:'observation',relation:'gap',supports:[],missing_conditions:['可独立核验的原始记录及保存时间'],alternatives:['理由可能在事后补录，即使声明为当时记录']};
+      adjustments.push({claim_id:x.id,reason:'区分用户声明记录时点与系统保存时间'});continue;
+    }
     if(x.metric_keys.length||g.topic==='metric'||metricText.test(x.text)){
       x.text=ctx.metrics.pnl===null?'当前视角不具备完整的可计算成交记录，不能展示已实现净盈亏。':'盈亏仅按实际买卖成交价、成交数量和所选费用口径计算。历史日线收盘价不参与该公式；盈亏本身不能证明决策依据或因果。';
       x.kind=ctx.metrics.pnl===null?'uncertain':'fact';x.evidence_ids=ctx.evidence.filter(e=>e.type==='trade').map(e=>e.id);x.metric_keys=ctx.metrics.pnl===null?[]:[...new Set([...x.metric_keys,'pnl'])];
