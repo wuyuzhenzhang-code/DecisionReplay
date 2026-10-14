@@ -10,8 +10,8 @@ const results=[];fs.mkdirSync('.test-results',{recursive:true});
 for(const perspective of ['before','after']){
  const response=await fetch(base+'/api/replay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'analyze',case:c,perspective,cutoff:c.trades[0].at}),signal:AbortSignal.timeout(135000)}),data=await response.json(),ctx=buildContext(c,perspective,c.trades[0].at);
  const errors=data.report?[...validateReport(data.report,ctx),...validateGrounding(data.report,ctx)]:['没有返回报告'];
- results.push({perspective,status:response.status,code:data.code,validationVersion:data.validationVersion,errors,report:data.report,adjustments:data.adjustments,checkedAt:new Date().toISOString()});
- if(response.status!==200){process.exitCode=1;break;}
+ results.push({perspective,status:response.status,code:data.code,error:data.error,trace:data.trace,validationVersion:data.validationVersion,errors,report:data.report,adjustments:data.adjustments,checkedAt:new Date().toISOString()});
+ if(response.status!==200){process.exitCode=1;continue;}
  if(errors.length||data.validationVersion!=='grounding-v1')process.exitCode=1;
 }
 fs.writeFileSync('.test-results/final-live-model.json',JSON.stringify({base,results,semanticReview:'结构检查不能替代人工语义抽查；请逐段确认没有补写依据权重或动机。'},null,2));
