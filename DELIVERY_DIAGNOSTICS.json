@@ -1,0 +1,199 @@
+{
+  "recordedAt": "2026-10-14T19:10:32.718Z",
+  "scope": "takeover diagnostics; no business-code changes",
+  "featureCommit": "6db3146227f107fab2b3392172fcef26185c01ec",
+  "previousArchiveCommit": "101b5a371b0c4f412e57208d3608f472d3691a92",
+  "branch": "main",
+  "persistentGitRemotes": [],
+  "production": {
+    "version": 5,
+    "commit": "eedc86e6b032f2322948ba1e944dca6e33a97ca7",
+    "deploymentId": "appgdep_6acfc0b9190c8191bf4ed1a7365471da",
+    "versionId": "appgprj_6aceccd0685481919c19f66332747a68~appgver_1b277eca5ff0819191bff0d10a967a39",
+    "deploymentUpdatedAt": "2026-10-14T17:50:39.710969+00:00",
+    "status": "succeeded",
+    "accessMode": "public",
+    "currentUserRole": "owner",
+    "envRevision": 4,
+    "secretNamesPresent": [
+      "OPENAI_API_KEY",
+      "FUYAO_API_KEY"
+    ],
+    "secretValues": "redacted by service; not read or copied",
+    "runtimeConfig": {
+      "aiConfigured": true,
+      "marketConfigured": true,
+      "model": "gpt-5-mini"
+    }
+  },
+  "sourceSync": {
+    "result": "failed",
+    "credentialIssued": true,
+    "credentialScope": "existing Site, short-lived",
+    "stage": "HTTPS connection before HTTP authentication",
+    "helperExitCode": 1,
+    "error": "Failed to connect to git.chatgpt-team.site:443 after 270 ms: Could not connect to server",
+    "httpStatus": null,
+    "dns": {
+      "gitHost": "resolved",
+      "publicSite": "resolved",
+      "openaiHost": "resolved"
+    },
+    "curl": {
+      "gitHost": {
+        "httpCode": 0,
+        "exitCode": 7,
+        "elapsedMs": 6
+      },
+      "publicSite": {
+        "httpCode": 0,
+        "exitCode": 7,
+        "elapsedMs": 5
+      }
+    },
+    "proxyEnvironmentConfigured": false,
+    "classification": "DNS resolves; TCP connect immediately denied with EACCES in the local execution process. Current task network restriction is known; underlying OS/platform filter identity is not exposed. TLS/HTTP/authentication and repository ACL were not reached.",
+    "pushed": false,
+    "newVersionSaved": false,
+    "newDeploymentStarted": false,
+    "latestAttempt": {
+      "credentialIssued": true,
+      "command": "official site-workflow.mjs -> git ls-remote --heads <confirmed authenticated endpoint> refs/heads/main",
+      "exitCode": 1,
+      "elapsedMs": 74,
+      "stage": "TCP connect, before TLS/HTTP/authentication",
+      "httpStatus": null,
+      "error": "Failed to connect to git.chatgpt-team.site:443 after 74 ms: Could not connect to server"
+    },
+    "tcpEvidence": {
+      "recordedAt": "2026-10-14T19:30:01.200Z",
+      "results": [
+        {
+          "host": "git.chatgpt-team.site",
+          "port": 443,
+          "startedAt": "2026-10-14T19:30:01.133Z",
+          "dns": {
+            "status": "resolved",
+            "addressCount": 2
+          },
+          "tcp": {
+            "status": "failed",
+            "code": "EACCES",
+            "errors": [
+              {
+                "code": "EACCES",
+                "syscall": "connect"
+              },
+              {
+                "code": "EACCES",
+                "syscall": "connect"
+              }
+            ],
+            "elapsedMs": 4
+          }
+        },
+        {
+          "host": "github.com",
+          "port": 443,
+          "startedAt": "2026-10-14T19:30:01.143Z",
+          "dns": {
+            "status": "resolved",
+            "addressCount": 1
+          },
+          "tcp": {
+            "status": "failed",
+            "code": "EACCES",
+            "syscall": "connect",
+            "elapsedMs": 1
+          }
+        }
+      ]
+    }
+  },
+  "reviewerAccess": {
+    "repositoryUrl": "https://github.com/wuyuzhenzhang-code/DecisionReplay",
+    "visibility": "public",
+    "userAuthorizedCreation": true,
+    "createdThrough": "GitHub authenticated official UI",
+    "connectorPermissions": {
+      "pull": true,
+      "push": true,
+      "admin": true
+    },
+    "initialMainCommit": "0f22b52cc51f0856570b3c08b3716e2faac6424b",
+    "mainRead": "passed via official connector",
+    "sourceSnapshotUpload": "Official authenticated GitHub web uploads; final completeness and SHA mapping in external RELEASE_MANIFEST.json",
+    "anonymousIndependentRead": "Token-free public raw source read passed via browser; separate-device signed-out repository-home test not performed",
+    "requiresReviewerCredential": false,
+    "connectorWrite": {
+      "result": "failed",
+      "operation": "create_tree",
+      "httpStatus": 403,
+      "error": "Resource not accessible by integration",
+      "meaning": "Account push metadata does not prove integration write authorization"
+    },
+    "webWrite": {
+      "result": "passed for uploaded directories; full snapshot verification in RELEASE_MANIFEST",
+      "method": "authenticated GitHub official upload UI",
+      "newCredentialsCreated": false
+    },
+    "publicRawRead": {
+      "recordedAt": "2026-10-14T19:43:50.661Z",
+      "url": "https://raw.githubusercontent.com/wuyuzhenzhang-code/DecisionReplay/refs/heads/main/lib/grounding.ts",
+      "result": "passed: generated browser document displayed the actual grounding.ts source",
+      "credentialInUrl": false,
+      "explicitAuthorizationHeaderSupplied": false,
+      "limits": "No separate-device signed-out repository-home test; search service request returned DisabledError earlier."
+    }
+  },
+  "freshV5MarketDiagnostic": {
+    "purpose": "isolate local vs production connection; NOT repaired-version acceptance",
+    "via": "browser test-connection button",
+    "externalServiceRequested": true,
+    "bypassedApplicationCache": true,
+    "proof": "unchanged route action=test invokes queryMarket with force=true; UI completed with three rows and fresh verification timestamp",
+    "returnedCount": 3,
+    "requestId": "f224e0d566574fc7bfe2a143706db39a",
+    "verifiedAt": "2026-10-14T19:05:42.802Z",
+    "uiResult": "历史日线连接验证成功",
+    "rawPricesIncluded": false
+  },
+  "currentLocalGates": {
+    "tests": {
+      "total": 64,
+      "passed": 64,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheckExit": 0,
+    "buildExit": 0,
+    "logs": [
+      "takeover-tests.log",
+      "takeover-typecheck.log",
+      "takeover-build.log"
+    ]
+  },
+  "newVersionLiveAcceptance": {
+    "market": "not executed: new version not deployed",
+    "aiBefore": "not executed: new version not deployed",
+    "aiAfter": "not executed: new version not deployed",
+    "externalOpenAIRequestsThisTakeover": 0,
+    "fullBrowserFlow": "not executed: new version not deployed"
+  },
+  "earlierLocalServiceEvidence": {
+    "at": "2026-10-14T18:43:00.737Z",
+    "market": "HTTP 503 / network; external fetch attempted but no valid response obtained",
+    "model": "HTTP 503 / not_configured; no external OpenAI request",
+    "productionImplication": "local missing OpenAI configuration does not imply production missing configuration"
+  },
+  "lastUpdatedAt": "2026-10-14T19:34:31.731Z",
+  "execution": {
+    "location": "user local Windows computer, Work Mode command executor",
+    "os": "Windows 10.0.22631",
+    "powershell": "7.6.5",
+    "networkPolicy": "restricted",
+    "sandboxApproval": "disabled / automatically rejected",
+    "accountNetworkSwitch": "user confirmed enabled; separate from task policy",
+    "policyChanged": false
+  }
+}
