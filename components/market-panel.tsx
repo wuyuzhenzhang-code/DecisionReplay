@@ -1,0 +1,30 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import {Database,RefreshCw,ShieldCheck,Settings2} from 'lucide-react';
+import {type ReplayCase,type Evidence,dateOnly,shanghai,now} from '../lib/replay';
+import {type MarketStatus,type MarketResult,marketLabels,mergeMarketEvidence} from '../lib/market';
+import {Modal} from './replay-ui';
+export function MarketPanel({c,visible,onUpdate,onImport}:{c:ReplayCase;visible:Evidence[];onUpdate:(e:Evidence[])=>void;onImport:()=>void}){
+  const [status,setStatus]=useState<MarketStatus|null>(null),[busy,setBusy]=useState(''),[message,setMessage]=useState(''),[failure,setFailure]=useState(''),[requestId,setRequestId]=useState(''),[help,setHelp]=useState(false);
+  const [start,setStart]=useState(dateOnly(new Date(Date.parse(c.trades[0].at)-7*86400000).toISOString())),[end,setEnd]=useState(dateOnly(c.trades[1]?.at||c.trades[0].at));
+  const request=useRef<AbortController|null>(null),latest=useRef(c);latest.current=c;
+  useEffect(()=>{const control=new AbortController();fetch('/api/market',{signal:control.signal}).then(r=>r.json()).then(data=>setStatus(data as MarketStatus)).catch(e=>{if(e.name!=='AbortError')setFailure('无法读取行情连接状态，请稍后测试连接。');});return()=>{control.abort();request.current?.abort();};},[]);
+  useEffect(()=>{if(!status?.verificationExpiresAt)return;const timer=setTimeout(()=>setStatus(s=>s?{...s,state:'unverified',message:'上次验证已过期，请重新测试连接。',verificationExpiresAt:undefined}:s),Math.max(0,Date.parse(status.verificationExpiresAt)-Date.now()));return()=>clearTimeout(timer);},[status?.verificationExpiresAt]);
+  const prices=visible.filter(e=>e.type==='price'&&e.mode==='historical'&&e.source==='扶摇金融数据 API').sort((a,b)=>Date.parse(a.occurredAt)-Date.parse(b.occurredAt)),fetched=prices.map(e=>e.fetchedAt).sort().at(-1),synthetic=c.mode==='synthetic'||c.evidence.some(e=>e.type==='price'&&e.mode==='synthetic');
+  async function run(action:'test'|'fetch'){
+    if(busy)return;const controller=new AbortController();request.current=controller;const revision=c.revision;setBusy(action);setFailure('');setMessage('');setRequestId('');
+    try{const response=await fetch('/api/market',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({action,query:{symbol:c.symbol,start,end}})});const result=await response.json() as MarketResult&{error?:string;code?:string;count?:number};if(controller.signal.aborted)return;if(result.status)setStatus(result.status);setRequestId(result.requestId||'');if(!response.ok){setFailure(result.error||'行情查询失败，请重试。');setMessage(marketLabels[result.code as keyof typeof marketLabels]||'查询未完成');return;}
+      if(action==='fetch'){if(latest.current.revision!==revision){setFailure('案例已修改，本次结果未导入，请重新获取。');return;}onUpdate(mergeMarketEvidence(latest.current,result.evidence));setMessage(`已导入 ${result.evidence.length} 条真实历史日线${result.cached?'（来自最近查询缓存）':''}。已按日期去重；请重新生成复盘。`);}
+      else setMessage(`历史日线连接验证成功。测试区间 2025-02-05 至 2025-02-07，返回 ${result.count} 条；测试行情不会加入当前案例。`);
+    }catch(e){if(e instanceof Error&&e.name!=='AbortError')setFailure(e.message==='Failed to fetch'?'网络连接中断，请稍后重试。':e.message);}finally{if(request.current===controller){setBusy('');request.current=null;}}
+  }
+  return <section className="market-card" aria-label="行情数据"><div className="section-title"><div className="market-title"><span className="data-icon"><Database size={19}/></span><div><h2>行情数据</h2><p>扶摇金融数据 API · A 股历史日线</p></div></div><span className={'connection-badge '+(status?.state==='verified'?'connected':'')}>{status?marketLabels[status.state]:'正在读取配置'}</span></div>
+    <div className="market-facts"><div><span>最近验证</span><strong>{status?.verifiedAt?shanghai(status.verifiedAt):'尚无成功验证'}</strong></div><div><span>当前视角覆盖区间</span><strong>{prices.length?`${dateOnly(prices[0].occurredAt)} — ${dateOnly(prices.at(-1)!.occurredAt)}`:'暂无真实日线'}</strong></div><div><span>最新可见行情 / 获取时间</span><strong>{prices.length?`${dateOnly(prices.at(-1)!.occurredAt)} / ${shanghai(fetched!)}`:'—'}</strong></div><div><span>价格口径</span><strong>日线 · 不复权 · 元 / 股</strong></div></div>
+    <div className="market-range"><label>股票代码<input aria-label="行情股票代码" value={c.symbol} readOnly/></label><label>开始日期<input aria-label="行情开始日期" type="date" value={start} onChange={e=>setStart(e.target.value)}/></label><label>结束日期<input aria-label="行情结束日期" type="date" max={dateOnly(now())} value={end} onChange={e=>setEnd(e.target.value)}/></label></div>
+    <div className="market-actions"><button className="primary" disabled={!!busy||synthetic||!start||!end} onClick={()=>run('fetch')}><Database size={15}/>{busy==='fetch'?'正在获取…':'获取真实历史行情'}</button><button disabled={!!busy} onClick={()=>run('test')}><RefreshCw size={15} className={busy==='test'?'spinning':''}/>{busy==='test'?'正在验证…':'测试连接'}</button><button onClick={()=>setHelp(true)}><Settings2 size={15}/>配置说明</button><button onClick={onImport}>导入证据</button></div>
+    {synthetic&&<p className="market-note">当前是合成示例。新建自己的案例后可获取真实行情，示例价格不会被真实价格覆盖。</p>}
+    {(message||failure)&&<div className={'market-feedback '+(failure?'failed':'')} role="status"><strong>{message}</strong>{failure&&<p>{failure}</p>}{requestId&&<small>排查编号：{requestId}</small>}</div>}
+    <p className="market-note"><ShieldCheck size={14}/>日线不是实时行情。原始发布时间未知，项目保守按行情日次日零点可用；事前图表、覆盖范围和 AI 只使用当时允许的证据。</p>
+    {help&&<Modal title="配置真实历史行情" onClose={()=>setHelp(false)}><div className="help"><h3>仅由站点所有者配置</h3><p>在 <a href="https://fuyao.aicubes.cn/admin/" target="_blank" rel="noreferrer">扶摇官方管理页</a>登录同花顺账户，核对历史日线接口权限，再创建或使用已有 API Key。登录成功不等于接口已授权。</p><h3>安全保存</h3><p>本地将 FUYAO_API_KEY 写入项目的私密 .env.local，重新启动服务。线上在 Sites 设置 → 环境变量中加入 FUYAO_API_KEY 并标记为机密，随后重新发布。此页面不接收或展示密钥。</p><h3>验证与费用</h3><p>点击“测试连接”会由后端对 600000.SH 的 2025-02-05 至 2025-02-07 发起最小历史查询。仅非空有效结果才标记验证成功。权限、额度、日期覆盖、公开展示许可及可能费用应以官方账户确认为准；本产品不自动购买。</p><p>连接状态验证有效期十五分钟，运行实例重启后需重新测试；缓存也仅保留十五分钟。取数失败不会替换已有证据。</p><a href="https://fuyao.aicubes.cn/docs/api-reference/prices/" target="_blank" rel="noreferrer">查看官方行情文档 ↗</a></div></Modal>}
+  </section>;
+}
