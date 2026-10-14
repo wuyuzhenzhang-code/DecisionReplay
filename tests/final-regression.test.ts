@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {examples} from '../lib/examples.ts';
+import {buildContext,ruleReport,metrics,validateCase,reportMarkdown,type Claim,type Check,type SavedReport} from '../lib/replay.ts';
+import {caseSchema} from '../lib/request-schema.ts';
+import {importCaseJSON} from '../lib/case-import.ts';
+import {enforceSemantics,simplifyReport,validateGrounding} from '../lib/grounding.ts';
+import {analyze} from '../lib/ai.ts';
+import {learningEligibility,historicalLearning,reuseLearning,editLearning,checksFromReport} from '../lib/learning.ts';
+
+const failure='关注价格变化，但需要经营证据验证，价格本身不能证明原因。';
+function fixture(reason=failure){const c=examples()[0];c.evidence=c.evidence.filter(e=>e.type==='price');c.reasons=[{...c.reasons[0],text:reason,expected:''}];return c;}
+function grounded(input:ReturnType<typeof fixture>|string=fixture()){
+  const c=typeof input==='string'?fixture(input):input;
+  const ctx=buildContext(c,'before',c.trades[0].at),r=ruleReport(ctx);
+  for(const x of [r.summary,...r.facts,...r.hypotheses,...r.biases,...r.uncertainties]){
+    const e=ctx.evidence.find(e=>x.evidence_ids.includes(e.id)),field=e?.type==='reason'?'text':'quantity';
+    x.grounding={topic:'observation',relation:'direct',supports:e?[{evidence_id:e.id,field,quote:String(e.raw[field])}]:[],missing_conditions:[],alternatives:[]};
+  }
+  return {c,ctx,r};
+}
+function motive(x:Claim,text:string){x.text=text;x.grounding!.topic='decision_basis';}
+test('语义：仅关注价格不得升级为依据权重；原已知失败原文',()=>{const {r,ctx}=grounded();motive(r.hypotheses[0],'买入由价格关注驱动，降低了基本面证据权重。');const out=enforceSemantics(r,ctx);assert.equal(out.report.hypotheses[0].kind,'uncertain');assert.match(out.report.hypotheses[0].text,/关注价格不等于/);assert.ok(!out.report.hypotheses[0].text.includes('降低了'));});
+test('语义：本次未提供经营资料不等于当时没考虑；合法引用也会降级',()=>{const {r,ctx}=grounded('等待验证信息。');motive(r.hypotheses[0],'没有提供经营证据，因此当时没有经营依据。');assert.deepEqual(validateGrounding(r,ctx),[]);assert.match(enforceSemantics(r,ctx).report.hypotheses[0].text,/未提交经营证据也不等于/);});
+test('语义：明确仅依据价格、未查看经营资料保留有边界的推断和原文',()=>{const {r,ctx}=grounded('仅依据价格、未查看经营资料');motive(r.hypotheses[0],'用户仅依据价格，可讨论信息选择线索。');const x=enforceSemantics(r,ctx).report.hypotheses[0];assert.equal(x.kind,'inference');assert.equal(x.grounding!.supports[0].quote,'仅依据价格、未查看经营资料');assert.match(x.text,/不证明实际执行情况/);assert.ok(x.grounding!.alternatives.length);});
+test('语义：反事实、否定和引用的仅依据价格不能获得明示依据权限',()=>{for(const text of ['我不是仅依据价格、未查看经营资料','如果仅依据价格、未查看经营资料，就不充分','他认为仅依据价格、未查看经营资料','“仅依据价格、未查看经营资料”是一个坏例子']){const {r,ctx}=grounded(text);motive(r.hypotheses[0],'仅依据价格驱动买入。');assert.equal(enforceSemantics(r,ctx).report.hypotheses[0].kind,'uncertain');}});
+test('语义：同报告矛盾动机均经服务端独立重建',()=>{const {r,ctx}=grounded();motive(r.summary,'价格是主要买入依据。');motive(r.hypotheses[0],'无法确定买入依据。');const out=enforceSemantics(r,ctx).report;assert.equal(out.summary.text,out.hypotheses[0].text);assert.equal(out.summary.kind,'uncertain');});
+test('语义：模型将动机错误标记为 observation 仍被检查',()=>{const {r,ctx}=grounded();r.hypotheses[0].text='用户忽略基本面，受到短期价格驱动。';assert.equal(r.hypotheses[0].grounding!.topic,'observation');assert.equal(enforceSemantics(r,ctx).report.hypotheses[0].kind,'uncertain');});
+test('语义：自述也不足以确诊偏差；因果仍需独立证据',()=>{const {r,ctx}=grounded('仅依据价格、未查看经营资料');r.biases[0].text='存在确定的从众心理偏差。';r.biases[0].grounding!.topic='psychology';r.uncertainties[0].text='经营变化导致交易亏损。';r.uncertainties[0].grounding!.topic='causal';const out=enforceSemantics(r,ctx).report;assert.match(out.biases[0].text,/不足以诊断/);assert.match(out.uncertainties[0].text,/不能确定/);});
+test('语义：相互冲突的原始理由不择一确定动机',()=>{const c=fixture('仅依据价格、未查看经营资料。不是仅依据价格，已经查看经营资料。'),{r,ctx}=grounded(c);motive(r.hypotheses[0],'仅依据价格驱动买入。');assert.match(enforceSemantics(r,ctx).report.hypotheses[0].text,/不同表述/);});
+test('原文：伪造片段即使引用 ID 合法仍不通过',()=>{const {r,ctx}=grounded();r.hypotheses[0].grounding!.supports[0].quote='只看价格，忽略经营';assert.match(validateGrounding(r,ctx).join(),/原文片段/);});
+test('原文：禁止来自未来证据、非 raw 字段及另一条证据的摘录',()=>{for(const change of [(s:{evidence_id:string;field:string;quote:string})=>s.evidence_id='event-after',(s:{field:string})=>s.field='title',(s:{quote:string})=>s.quote='不存在的原文']){const {r,ctx}=grounded();change(r.hypotheses[0].grounding!.supports[0]);assert.ok(validateGrounding(r,ctx).length);}});
+test('语义：保留合法交易事实，不把所有段落改成无法判断',()=>{const {r,ctx}=grounded(),original=r.facts[0];const result=enforceSemantics(r,ctx).report;assert.deepEqual(result.facts[0],original);assert.equal(result.facts[0].kind,'fact');});
+test('金额：净盈亏为负十七，历史收盘不参与；错误模型口径被替换',()=>{const c=fixture();c.trades[0].price=10.39;c.trades[1].price=10.32;const ctx=buildContext(c,'after',c.trades[0].at),{r}=grounded(c);r.facts[0].metric_keys=['pnl'];r.facts[0].text='净盈亏由日线收盘价计算。';const out=enforceSemantics(r,ctx).report.facts[0];assert.equal(metrics(c).pnl,-17);assert.match(out.text,/历史日线收盘价不参与/);c.evidence.forEach(e=>e.raw.close=999);assert.equal(metrics(c).pnl,-17);});
+test('繁简：仅转换生成叙述；证据 ID、原文、URL 和数值均保持',()=>{const {r}=grounded();r.hypotheses[0].text='關注價格與經營證據';r.hypotheses[0].id='結論';r.hypotheses[0].evidence_ids=['證據'];r.hypotheses[0].grounding!.supports=[{evidence_id:'證據',field:'text',quote:'價格123 https://example.test/繁體'}];const out=simplifyReport(r);assert.equal(out.hypotheses[0].text,'关注价格与经营证据');assert.equal(out.hypotheses[0].id,'結論');assert.deepEqual(out.hypotheses[0].grounding!.supports,r.hypotheses[0].grounding!.supports);assert.deepEqual(out.hypotheses[0].evidence_ids,['證據']);});
+test('模拟模型：失败案例整条 analyze 管线重写，非真实模型验证',async()=>{const {r,ctx}=grounded();motive(r.hypotheses[0],'买入由价格驱动而不是经营信息。');let calls=0;const mock:typeof fetch=async()=>{calls++;return Response.json({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(r)}]}]});};const out=await analyze(ctx,'','test-key','gpt-5-mini',mock);assert.equal(calls,1);assert.equal(out.report.hypotheses[0].kind,'uncertain');assert.ok(out.adjustments.length);});
+test('模拟模型：两次虚假原文均拒绝，不把模型自检当证据',async()=>{const {r,ctx}=grounded();r.hypotheses[0].grounding!.supports[0].quote='伪造依据';let calls=0;const mock:typeof fetch=async()=>{calls++;return Response.json({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(r)}]}]});};await assert.rejects(analyze(ctx,'','test-key','gpt-5-mini',mock),/原文片段/);assert.equal(calls,2);});
+
+const check=(extra:Partial<Check>={}):Check=>({id:'learning',text:'先核对原始记录',checked:false,selected:true,sourceCase:'previous',sourceClaim:'claim',sourcePerspective:'after',formedAt:'2025-01-01T00:00:00Z',carriedAt:'2025-01-02T00:00:00Z',...extra});
+const cutoff='2025-02-01T00:00:00Z';
+test('清单：本案例事后结论不进入严格历史事前视角',()=>assert.equal(learningEligibility(check({sourceCase:'current'}),'current',cutoff).eligible,false));
+test('清单：在新决策之前形成且带入的跨案例项可用',()=>assert.equal(learningEligibility(check(),'current',cutoff).eligible,true));
+test('清单：形成或带入晚于决策时间均不可用',()=>{for(const extra of [{formedAt:'2026-01-01T00:00:00Z'},{carriedAt:'2026-01-01T00:00:00Z'}])assert.equal(learningEligibility(check(extra),'current',cutoff).eligible,false);});
+test('清单：旧数据缺少形成/带入时间保留内容，但不自动历史放行',()=>{for(const extra of [{formedAt:undefined},{carriedAt:undefined}]){const item=check(extra);assert.equal(item.text,'先核对原始记录');assert.equal(learningEligibility(item,'current',cutoff).eligible,false);}});
+test('清单：复制保留形成时间、来源、来源视角和修改时间',()=>{const original=check({contentUpdatedAt:'2025-01-01T12:00:00Z'}),copy=reuseLearning([original],'2025-01-10T00:00:00Z')[0];assert.equal(copy.formedAt,original.formedAt);assert.equal(copy.sourceCase,original.sourceCase);assert.equal(copy.sourcePerspective,original.sourcePerspective);assert.equal(copy.contentUpdatedAt,original.contentUpdatedAt);assert.notEqual(copy.id,original.id);assert.equal(copy.carriedAt,'2025-01-10T00:00:00Z');});
+test('清单：今天复制旧清单不能倒填到过去',()=>{const copied=reuseLearning([check()],'2026-10-14T00:00:00Z')[0];assert.equal(learningEligibility(copied,'current',cutoff).eligible,false);});
+test('清单：修改保留形成时间，并阻止把新文本倒填为历史',()=>{const old=check(),edited=editLearning(old,'新的学习内容','2026-10-14T00:00:00Z');assert.equal(edited.formedAt,old.formedAt);assert.equal(learningEligibility(edited,'current',cutoff).eligible,false);});
+test('清单：刷新恢复 schema 路径保留时间元数据及来源',()=>{const c=fixture();c.checklist=[check()];const storage=JSON.stringify({cases:[c],active:c.id});const restored=caseSchema.parse(JSON.parse(storage).cases[0]);assert.deepEqual(restored.checklist,c.checklist);assert.deepEqual(validateCase(restored),[]);});
+test('清单：导出再导入保持来源和原始时间，不重置历史资格',()=>{const c=fixture();c.checklist=[check()];const exported=JSON.stringify({version:1,case:c}),next=caseSchema.parse(JSON.parse(exported).case);next.id='new-import-id';assert.deepEqual(next.checklist,c.checklist);assert.equal(historicalLearning(next,cutoff).length,1);assert.match(reportMarkdown(next,'before',next.trades[0].at),/形成：2025-01-01/);});
+test('清单：报告生成时记录形成时间/来源结论/视角，学习不进入市场证据',()=>{const c=fixture(),ctx=buildContext(c,'before',c.trades[0].at),saved:SavedReport={report:ruleReport(ctx),revision:1,perspective:'before',cutoff:c.trades[0].at,createdAt:'2026-10-14T00:00:00Z',mode:'rules',trace:[]};c.checklist=checksFromReport(c.id,saved);assert.equal(c.checklist[0].formedAt,saved.createdAt);assert.equal(c.checklist[0].sourcePerspective,'before');assert.ok(c.checklist[0].sourceText);c.checklist[0].text='仅学习使用的秘密标记';assert.ok(!JSON.stringify(buildContext(c,'before',c.trades[0].at)).includes('仅学习使用的秘密标记'));});
+test('清单：重复导入保留原案例身份，不能把本案例事后结论变成跨案例',()=>{const c=fixture();c.checklist=[check({sourceCase:c.id,carriedAt:undefined})];const once=importCaseJSON(JSON.stringify(c)),twice=importCaseJSON(JSON.stringify(once));assert.equal(twice.originalCaseId,c.id);assert.equal(twice.checklist[0].sourceCase,c.id);assert.equal(historicalLearning(twice,cutoff).length,0);assert.match(learningEligibility(twice.checklist[0],twice.id,cutoff,twice.originalCaseId).reason,/本案例事后/);});
+test('清单：本案例事前已形成的内容导入后保留资格，不要求伪造带入时间',()=>{const c=fixture();c.checklist=[check({sourceCase:c.id,carriedAt:undefined,sourcePerspective:'before'})];const restored=importCaseJSON(JSON.stringify(c));assert.equal(historicalLearning(restored,cutoff).length,1);assert.equal(restored.checklist[0].carriedAt,undefined);});
